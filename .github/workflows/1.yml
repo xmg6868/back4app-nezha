@@ -1,0 +1,43 @@
+name: Extract Argo-Nezha Dashboard
+
+on:
+  workflow_dispatch:
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Pull image
+        run: |
+          docker pull mikehand888/argo-nezha:latest
+
+      - name: Create container
+        run: |
+          docker create --name argo-temp mikehand888/argo-nezha:latest
+
+      - name: Extract dashboard
+        run: |
+          mkdir -p output/dashboard
+          docker cp argo-temp:/dashboard/. output/dashboard/
+
+      - name: Check files
+        run: |
+          echo "===== dashboard ====="
+          find output/dashboard -maxdepth 2 -type f -printf '%p\n' | sort
+          echo "===== required ====="
+          test -f output/dashboard/entrypoint.sh
+          test -f output/dashboard/app
+          test -f output/dashboard/caddy
+          test -f output/dashboard/cloudflared
+          test -f output/dashboard/nezha-agent
+
+      - name: Pack
+        run: |
+          tar -czf argo-dashboard.tar.gz -C output dashboard
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: argo-dashboard
+          path: argo-dashboard.tar.gz
