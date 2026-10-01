@@ -1,10 +1,10 @@
-name: Extract Argo-Nezha Dashboard
+name: Inspect Argo-Nezha
 
 on:
   workflow_dispatch:
 
 jobs:
-  extract:
+  inspect:
     runs-on: ubuntu-latest
 
     steps:
@@ -12,32 +12,32 @@ jobs:
         run: |
           docker pull mikehand888/argo-nezha:latest
 
-      - name: Create container
+      - name: Export image filesystem
         run: |
           docker create --name argo-temp mikehand888/argo-nezha:latest
+          docker export argo-temp -o filesystem.tar
 
-      - name: Extract dashboard
+      - name: Inspect dashboard
         run: |
-          mkdir -p output/dashboard
-          docker cp argo-temp:/dashboard/. output/dashboard/
+          mkdir rootfs
+          tar -xf filesystem.tar -C rootfs
 
-      - name: Check files
-        run: |
-          echo "===== dashboard ====="
-          find output/dashboard -maxdepth 2 -type f -printf '%p\n' | sort
-          echo "===== required ====="
-          test -f output/dashboard/entrypoint.sh
-          test -f output/dashboard/app
-          test -f output/dashboard/caddy
-          test -f output/dashboard/cloudflared
-          test -f output/dashboard/nezha-agent
+          echo "===== ROOT ====="
+          find rootfs -maxdepth 2 -type f | sort
 
-      - name: Pack
-        run: |
-          tar -czf argo-dashboard.tar.gz -C output dashboard
+          echo "===== DASHBOARD ====="
+          find rootfs/dashboard -maxdepth 5 -type f 2>/dev/null | sort || true
 
-      - name: Upload
+          echo "===== POSSIBLE BINARIES ====="
+          find rootfs -type f \( \
+            -name "app" -o \
+            -name "caddy" -o \
+            -name "cloudflared" -o \
+            -name "nezha-agent" \
+          \) 2>/dev/null | sort || true
+
+      - name: Upload filesystem
         uses: actions/upload-artifact@v4
         with:
-          name: argo-dashboard
-          path: argo-dashboard.tar.gz
+          name: argo-nezha-filesystem
+          path: filesystem.tar
