@@ -1,26 +1,127 @@
-name: Get Argo Nezha init.sh
+name: Build Argo-Nezha Dashboard
 
 on:
   workflow_dispatch:
 
 jobs:
-  get:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download init.sh
+      - name: Pull image
         run: |
-          curl -fsSL \
-            https://raw.githubusercontent.com/Kiritocyz/Argo-Nezha-Service-Container/main/init.sh \
-            -o init.sh
+          docker pull mikehand888/argo-nezha:latest
 
-      - name: Show init.sh
+      - name: Start Argo-Nezha
         run: |
-          echo "===== init.sh ====="
-          cat init.sh
+          docker run -d \
+            --name argo-nezha \
+            -e GH_USER="${{ secrets.GH_USER }}" \
+            -e GH_CLIENTID="${{ secrets.GH_CLIENTID }}" \
+            -e GH_CLIENTSECRET="${{ secrets.GH_CLIENTSECRET }}" \
+            -e GH_BACKUP_USER="${{ secrets.GH_BACKUP_USER }}" \
+            -e GH_REPO="${{ secrets.GH_REPO }}" \
+            -e GH_EMAIL="${{ secrets.GH_EMAIL }}" \
+            -e GH_PAT="${{ secrets.GH_PAT }}" \
+            -e ARGO_AUTH="${{ secrets.ARGO_AUTH }}" \
+            -e ARGO_DOMAIN="${{ secrets.ARGO_DOMAIN }}" \
+            -e PRO_PORT="18391" \
+            -e REVERSE_PROXY_MODE="caddy" \
+            -e DASHBOARD_VERSION="" \
+            -e AGENT_VERSION="" \
+            -e NO_AUTO_RENEW="1" \
+            -e BACKUP_TIME="0 4 * * *" \
+            -e BACKUP_NUM="5" \
+            -p 18391:18391 \
+            mikehand888/argo-nezha:latest
 
-      - name: Upload
+      - name: Wait for installation
+        run: |
+          echo "等待 init.sh 安装..."
+          
+          for i in $(seq 1 90); do
+            echo "===== $i/90 ====="
+
+            docker exec argo-nezha sh -c '
+              echo "--- /dashboard ---"
+              ls -lah /dashboard 2>/dev/null || true
+            ' || true
+
+            if docker exec argo-nezha sh -c '
+              test -x /dashboard/app &&
+              test -x /dashboard/caddy &&
+              test -x /dashboard/cloudflared &&
+              test -x /dashboard/nezha-agent &&
+              test -f /dashboard/Caddyfile &&
+              test -d /dashboard/data
+            '; then
+              echo "================================"
+              echo "安装完成"
+              echo "================================"
+              break
+            fi
+
+            sleep 10
+          done
+
+      - name: Show container logs
+        if: always()
+        run: |
+          echo "========== CONTAINER LOG =========="
+          docker logs argo-nezha 2>&1 | tail -300 || true
+
+      - name: Check installed files
+        run: |
+          echo "========== DASHBOARD =========="
+
+          docker exec argo-nezha sh -c '
+            find /dashboard -maxdepth 2 -type f \
+            -printf "%p\n" 2>/dev/null | sort
+          '
+
+          echo "========== REQUIRED =========="
+
+          docker exec argo-nezha sh -c '
+            test -x /dashboard/app
+            test -x /dashboard/caddy
+            test -x /dashboard/cloudflared
+            test -x /dashboard/nezha-agent
+            test -f /dashboard/Caddyfile
+            test -d /dashboard/data
+          '
+
+      - name: Copy dashboard
+        run: |
+          rm -rf output
+          mkdir -p output/dashboard
+
+          docker cp \
+            argo-nezha:/dashboard/. \
+            output/dashboard/
+
+      - name: Show extracted dashboard
+        run: |
+          echo "========== EXTRACTED =========="
+
+          find output/dashboard \
+            -maxdepth 2 \
+            -type f \
+            -printf "%p\n" | sort
+
+      - name: Pack dashboard
+        run: |
+          tar -czf argo-dashboard.tar.gz \
+            -C output dashboard
+
+          ls -lh argo-dashboard.tar.gz
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: init-script
-          path: init.sh
+          name: argo-dashboard
+          path: argo-dashboard.tar.gz
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f argo-nezha || true
