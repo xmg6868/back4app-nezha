@@ -1,63 +1,26 @@
-name: Inspect Argo-Nezha Entrypoint
+name: Get Argo Nezha init.sh
 
 on:
   workflow_dispatch:
 
 jobs:
-  inspect:
+  get:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Pull image
+      - name: Download init.sh
         run: |
-          docker pull mikehand888/argo-nezha:latest
+          curl -fsSL \
+            https://raw.githubusercontent.com/Kiritocyz/Argo-Nezha-Service-Container/main/init.sh \
+            -o init.sh
 
-      - name: Read image configuration
+      - name: Show init.sh
         run: |
-          docker create --name argo-temp mikehand888/argo-nezha:latest
+          echo "===== init.sh ====="
+          cat init.sh
 
-          echo "===== ENTRYPOINT ====="
-          docker inspect argo-temp \
-            --format='Entrypoint={{json .Config.Entrypoint}}'
-
-          echo "===== CMD ====="
-          docker inspect argo-temp \
-            --format='Cmd={{json .Config.Cmd}}'
-
-          echo "===== WORKDIR ====="
-          docker inspect argo-temp \
-            --format='WorkingDir={{json .Config.WorkingDir}}'
-
-          echo "===== ENV ====="
-          docker inspect argo-temp \
-            --format='{{range .Config.Env}}{{println .}}{{end}}'
-
-      - name: Extract entrypoint
-        run: |
-          rm -rf rootfs
-          mkdir rootfs
-
-          docker export argo-temp | tar -x -C rootfs
-
-          echo "===== /dashboard/entrypoint.sh ====="
-          cat rootfs/dashboard/entrypoint.sh
-
-          echo
-          echo "===== FILES ====="
-          find rootfs -type f 2>/dev/null | sort > files.txt
-
-          echo "Total files:"
-          wc -l files.txt
-
-          echo "===== EXECUTABLE FILES ====="
-          find rootfs -type f -executable 2>/dev/null | sort | head -300
-
-          docker rm argo-temp
-
-      - name: Upload inspection
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: argo-nezha-inspection
-          path: |
-            rootfs/dashboard/entrypoint.sh
-            files.txt
+          name: init-script
+          path: init.sh
