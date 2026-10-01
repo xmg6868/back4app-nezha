@@ -1,127 +1,53 @@
-name: Build Argo-Nezha Dashboard
+ name: Start Argo-Nezha
+ run: |
+    docker run -d \
+      --name argo-nezha \
+      -e GH_USER="${{ secrets.GH_USER }}" \
+      -e GH_CLIENTID="${{ secrets.GH_CLIENTID }}" \
+      -e GH_CLIENTSECRET="${{ secrets.GH_CLIENTSECRET }}" \
+      -e GH_BACKUP_USER="${{ secrets.GH_BACKUP_USER }}" \
+      -e GH_REPO="${{ secrets.GH_REPO }}" \
+      -e GH_EMAIL="${{ secrets.GH_EMAIL }}" \
+      -e GH_PAT="${{ secrets.GH_PAT }}" \
+      -e ARGO_AUTH="${{ secrets.ARGO_AUTH }}" \
+      -e ARGO_DOMAIN="${{ secrets.ARGO_DOMAIN }}" \
+      -e PRO_PORT="18391" \
+      -e REVERSE_PROXY_MODE="caddy" \
+      -e DASHBOARD_VERSION="" \
+      -e AGENT_VERSION="" \
+      -e NO_AUTO_RENEW="1" \
+      -e BACKUP_TIME="0 4 * * *" \
+      -e BACKUP_NUM="5" \
+      -p 18391:18391 \
+      --entrypoint /bin/sh \
+      mikehand888/argo-nezha:latest \
+      -c 'bash /dashboard/entrypoint.sh > /tmp/init.log 2>&1 & echo $! > /tmp/init.pid; tail -f /dev/null'
 
-on:
-  workflow_dispatch:
+  name: Wait for installation
+ run: |
+    for i in $(seq 1 90); do
+      echo "===== $i/90 ====="
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+      docker exec argo-nezha sh -c '
+        echo "--- init log ---"
+        tail -50 /tmp/init.log 2>/dev/null || true
+        echo "--- dashboard ---"
+        ls -lah /dashboard 2>/dev/null || true
+      ' || true
 
-    steps:
-      - name: Pull image
-        run: |
-          docker pull mikehand888/argo-nezha:latest
+      if docker exec argo-nezha sh -c '
+        test -x /dashboard/app &&
+        test -x /dashboard/caddy &&
+        test -x /dashboard/nezha-agent &&
+        test -f /dashboard/Caddyfile &&
+        test -d /dashboard/data
+      '; then
+        echo "安装完成"
+        exit 0
+      fi
 
-      - name: Start Argo-Nezha
-        run: |
-          docker run -d \
-            --name argo-nezha \
-            -e GH_USER="${{ secrets.GH_USER }}" \
-            -e GH_CLIENTID="${{ secrets.GH_CLIENTID }}" \
-            -e GH_CLIENTSECRET="${{ secrets.GH_CLIENTSECRET }}" \
-            -e GH_BACKUP_USER="${{ secrets.GH_BACKUP_USER }}" \
-            -e GH_REPO="${{ secrets.GH_REPO }}" \
-            -e GH_EMAIL="${{ secrets.GH_EMAIL }}" \
-            -e GH_PAT="${{ secrets.GH_PAT }}" \
-            -e ARGO_AUTH="${{ secrets.ARGO_AUTH }}" \
-            -e ARGO_DOMAIN="${{ secrets.ARGO_DOMAIN }}" \
-            -e PRO_PORT="18391" \
-            -e REVERSE_PROXY_MODE="caddy" \
-            -e DASHBOARD_VERSION="" \
-            -e AGENT_VERSION="" \
-            -e NO_AUTO_RENEW="1" \
-            -e BACKUP_TIME="0 4 * * *" \
-            -e BACKUP_NUM="5" \
-            -p 18391:18391 \
-            mikehand888/argo-nezha:latest
+      sleep 10
+    done
 
-      - name: Wait for installation
-        run: |
-          echo "等待 init.sh 安装..."
-          
-          for i in $(seq 1 90); do
-            echo "===== $i/90 ====="
-
-            docker exec argo-nezha sh -c '
-              echo "--- /dashboard ---"
-              ls -lah /dashboard 2>/dev/null || true
-            ' || true
-
-            if docker exec argo-nezha sh -c '
-              test -x /dashboard/app &&
-              test -x /dashboard/caddy &&
-              test -x /dashboard/cloudflared &&
-              test -x /dashboard/nezha-agent &&
-              test -f /dashboard/Caddyfile &&
-              test -d /dashboard/data
-            '; then
-              echo "================================"
-              echo "安装完成"
-              echo "================================"
-              break
-            fi
-
-            sleep 10
-          done
-
-      - name: Show container logs
-        if: always()
-        run: |
-          echo "========== CONTAINER LOG =========="
-          docker logs argo-nezha 2>&1 | tail -300 || true
-
-      - name: Check installed files
-        run: |
-          echo "========== DASHBOARD =========="
-
-          docker exec argo-nezha sh -c '
-            find /dashboard -maxdepth 2 -type f \
-            -printf "%p\n" 2>/dev/null | sort
-          '
-
-          echo "========== REQUIRED =========="
-
-          docker exec argo-nezha sh -c '
-            test -x /dashboard/app
-            test -x /dashboard/caddy
-            test -x /dashboard/cloudflared
-            test -x /dashboard/nezha-agent
-            test -f /dashboard/Caddyfile
-            test -d /dashboard/data
-          '
-
-      - name: Copy dashboard
-        run: |
-          rm -rf output
-          mkdir -p output/dashboard
-
-          docker cp \
-            argo-nezha:/dashboard/. \
-            output/dashboard/
-
-      - name: Show extracted dashboard
-        run: |
-          echo "========== EXTRACTED =========="
-
-          find output/dashboard \
-            -maxdepth 2 \
-            -type f \
-            -printf "%p\n" | sort
-
-      - name: Pack dashboard
-        run: |
-          tar -czf argo-dashboard.tar.gz \
-            -C output dashboard
-
-          ls -lh argo-dashboard.tar.gz
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: argo-dashboard
-          path: argo-dashboard.tar.gz
-
-      - name: Cleanup
-        if: always()
-        run: |
-          docker rm -f argo-nezha || true
+    echo "安装超时"
+    exit 1
